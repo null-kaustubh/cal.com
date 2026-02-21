@@ -1440,10 +1440,9 @@ export class AvailableSlotsService {
           r[dateString] = r[dateString] || [];
           const existingBooking = currentSeatsMap.get(timeISO);
 
-          const isFullyBooked =
-            eventType.seatsPerTimeSlot &&
-            existingBooking &&
-            existingBooking.attendees >= eventType.seatsPerTimeSlot;
+          const seatsPerSlot = eventType?.seatsPerTimeSlot;
+
+          const isFullyBooked = seatsPerSlot && existingBooking && existingBooking.attendees >= seatsPerSlot;
 
           // Skip fully booked slots
           if (isFullyBooked) {
