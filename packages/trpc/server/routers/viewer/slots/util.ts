@@ -1414,61 +1414,12 @@ export class AvailableSlotsService {
       timeZone: input.timeZone,
     });
 
-    function _mapSlotsToDate() {
-      const currentSeatsMap = new Map();
-
-      if (currentSeats && currentSeats.length > 0) {
-        currentSeats.forEach((booking) => {
-          const timeKey = booking.startTime.toISOString();
-          currentSeatsMap.set(timeKey, {
-            attendees: booking._count.attendees,
-            uid: booking.uid,
-          });
-        });
-      }
-
-      return availableTimeSlots.reduce(
-        (
-          r: Record<string, { time: string; attendees?: number; bookingUid?: string }[]>,
-          { time, ...passThroughProps }
-        ) => {
-          // This used to be _time.tz(input.timeZone) but Dayjs tz() is slow.
-          // toLocaleDateString slugish, using Intl.DateTimeFormat we get the desired speed results.
-          const dateString = formatter.format(time.toDate());
-          const timeISO = time.toISOString();
-
-          r[dateString] = r[dateString] || [];
-          const existingBooking = currentSeatsMap.get(timeISO);
-
-          const seatsPerSlot = eventType?.seatsPerTimeSlot;
-
-          const isFullyBooked = seatsPerSlot && existingBooking && existingBooking.attendees >= seatsPerSlot;
-
-          // Skip fully booked slots
-          if (isFullyBooked) {
-            return r;
-          }
-
-          // Apply first-slot-only AFTER capacity check
-          if (eventType?.onlyShowFirstAvailableSlot && r[dateString].length > 0) {
-            return r;
-          }
-
-          r[dateString].push({
-            ...passThroughProps,
-            time: timeISO,
-            ...(existingBooking && {
-              attendees: existingBooking.attendees,
-              bookingUid: existingBooking.uid,
-            }),
-          });
-          return r;
-        },
-        Object.create(null)
-      );
-    }
-    const mapSlotsToDate = withReporting(_mapSlotsToDate.bind(this), "mapSlotsToDate");
-    const slotsMappedToDate = mapSlotsToDate();
+    const slotsMappedToDate = mapSlotsToDateInternal({
+      availableTimeSlots,
+      currentSeats,
+      eventType,
+      formatter,
+    });
 
     const availableDates = Object.keys(slotsMappedToDate);
     const allDatesWithBookabilityStatus = this.getAllDatesWithBookabilityStatus(availableDates);
@@ -1605,4 +1556,69 @@ export class AvailableSlotsService {
       ...troubleshooterData,
     };
   }
+}
+
+export function mapSlotsToDateInternal({
+  availableTimeSlots,
+  currentSeats,
+  eventType,
+  formatter,
+}: {
+  availableTimeSlots: { time: dayjs.Dayjs }[];
+  currentSeats?: {
+    startTime: Date;
+    _count: { attendees: number };
+    uid?: string;
+  }[];
+  eventType?: {
+    seatsPerTimeSlot?: number | null;
+    onlyShowFirstAvailableSlot?: boolean | null;
+  };
+  formatter: Intl.DateTimeFormat;
+}) {
+  const currentSeatsMap = new Map<string, { attendees: number; uid?: string }>();
+
+  if (currentSeats?.length) {
+    currentSeats.forEach((booking) => {
+      currentSeatsMap.set(booking.startTime.toISOString(), {
+        attendees: booking._count.attendees,
+        uid: booking.uid,
+      });
+    });
+  }
+
+  return availableTimeSlots.reduce<
+    Record<string, { time: string; attendees?: number; bookingUid?: string }[]>
+  >((r, { time, ...passThroughProps }) => {
+    const dateString = formatter.format(time.toDate());
+    const timeISO = time.toISOString();
+
+    r[dateString] = r[dateString] || [];
+
+    const existingBooking = currentSeatsMap.get(timeISO);
+    const seatsPerSlot = eventType?.seatsPerTimeSlot;
+
+    const isFullyBooked = seatsPerSlot && existingBooking && existingBooking.attendees >= seatsPerSlot;
+
+    // Skip fully booked first
+    if (isFullyBooked) {
+      return r;
+    }
+
+    // Then apply first-slot-only
+    if (eventType?.onlyShowFirstAvailableSlot && r[dateString].length > 0) {
+      return r;
+    }
+
+    r[dateString].push({
+      ...passThroughProps,
+      time: timeISO,
+      ...(existingBooking && {
+        attendees: existingBooking.attendees,
+        bookingUid: existingBooking.uid,
+      }),
+    });
+
+    return r;
+  }, Object.create(null));
 }
