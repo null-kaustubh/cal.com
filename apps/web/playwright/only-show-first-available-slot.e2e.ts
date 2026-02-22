@@ -61,7 +61,7 @@ test.describe("onlyShowFirstAvailableSlot with seated events", () => {
     await page.goto(`/${user.username}/seats`);
 
     const tomorrowDate = tomorrow.getDate();
-    const tomorrowDay = page.locator(`[data-testid="day"][data-disabled="false"]`).filter({ hasText: String(tomorrowDate) }).first();
+    const tomorrowDay = page.locator(`[data-testid="day"][data-disabled="false"]`).getByText(String(tomorrowDate), { exact: true });
     await tomorrowDay.waitFor();
     await tomorrowDay.click();
 
@@ -124,7 +124,7 @@ test.describe("onlyShowFirstAvailableSlot with seated events", () => {
     await page.goto(`/${user.username}/seats`);
 
     const tomorrowDate = tomorrow.getDate();
-    const tomorrowDay = page.locator(`[data-testid="day"][data-disabled="false"]`).filter({ hasText: String(tomorrowDate) }).first();
+    const tomorrowDay = page.locator(`[data-testid="day"][data-disabled="false"]`).getByText(String(tomorrowDate), { exact: true });
     await tomorrowDay.waitFor();
     await tomorrowDay.click();
 
@@ -152,7 +152,7 @@ test.describe("onlyShowFirstAvailableSlot with seated events", () => {
     tomorrow.setDate(tomorrow.getDate() + 1);
     const tomorrowDate = tomorrow.getDate();
 
-    const tomorrowDay = page.locator(`[data-testid="day"][data-disabled="false"]`).filter({ hasText: String(tomorrowDate) }).first();
+    const tomorrowDay = page.locator(`[data-testid="day"][data-disabled="false"]`).getByText(String(tomorrowDate), { exact: true });
     await tomorrowDay.waitFor();
     await tomorrowDay.click();
 
@@ -181,7 +181,7 @@ test.describe("onlyShowFirstAvailableSlot with regular events", () => {
     tomorrow.setDate(tomorrow.getDate() + 1);
     const tomorrowDate = tomorrow.getDate();
 
-    const tomorrowDay = page.locator(`[data-testid="day"][data-disabled="false"]`).filter({ hasText: String(tomorrowDate) }).first();
+    const tomorrowDay = page.locator(`[data-testid="day"][data-disabled="false"]`).getByText(String(tomorrowDate), { exact: true });
     await tomorrowDay.waitFor();
     await tomorrowDay.click();
 
@@ -218,7 +218,7 @@ test.describe("onlyShowFirstAvailableSlot with regular events", () => {
     await page.goto(`/${user.username}/30-min`);
 
     const tomorrowDate = tomorrow.getDate();
-    const tomorrowDay = page.locator(`[data-testid="day"][data-disabled="false"]`).filter({ hasText: String(tomorrowDate) }).first();
+    const tomorrowDay = page.locator(`[data-testid="day"][data-disabled="false"]`).getByText(String(tomorrowDate), { exact: true });
     await tomorrowDay.waitFor();
     await tomorrowDay.click();
 
@@ -245,7 +245,7 @@ test.describe("onlyShowFirstAvailableSlot with regular events", () => {
     tomorrow.setDate(tomorrow.getDate() + 1);
     const tomorrowDate = tomorrow.getDate();
 
-    const tomorrowDay = page.locator(`[data-testid="day"][data-disabled="false"]`).filter({ hasText: String(tomorrowDate) }).first();
+    const tomorrowDay = page.locator(`[data-testid="day"][data-disabled="false"]`).getByText(String(tomorrowDate), { exact: true });
     await tomorrowDay.waitFor();
     await tomorrowDay.click();
 
