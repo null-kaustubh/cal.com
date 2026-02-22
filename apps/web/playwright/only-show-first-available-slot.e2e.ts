@@ -1,15 +1,23 @@
 import prisma from "@calcom/prisma";
+import type { Schedule, TimeRange } from "@calcom/types/schedule";
 import { expect } from "@playwright/test";
 import { v4 as uuidv4 } from "uuid";
 import { test } from "./lib/fixtures";
-import { bookTimeSlot, createUserWithSeatedEventAndAttendees } from "./lib/testUtils";
+import { bookTimeSlot } from "./lib/testUtils";
 
 test.describe.configure({ mode: "parallel" });
 test.afterEach(({ users }) => users.deleteAll());
 
+// 9 AM - 5 PM every day (including weekends) to ensure tomorrow is always available
+const defaultDateRange: TimeRange = {
+  start: new Date(new Date().setUTCHours(9, 0, 0, 0)),
+  end: new Date(new Date().setUTCHours(17, 0, 0, 0)),
+};
+const allDaysAvailable: Schedule = Array(7).fill([defaultDateRange]);
+
 test.describe("onlyShowFirstAvailableSlot with regular events", () => {
   test("Should show only one slot per day when enabled", async ({ page, users }) => {
-    const user = await users.create();
+    const user = await users.create({ schedule: allDaysAvailable });
     const eventType = user.eventTypes.find((e) => e.slug === "30-min")!;
 
     await prisma.eventType.update({
@@ -23,7 +31,9 @@ test.describe("onlyShowFirstAvailableSlot with regular events", () => {
     tomorrow.setDate(tomorrow.getDate() + 1);
     const tomorrowDate = tomorrow.getDate();
 
-    const tomorrowDay = page.locator(`[data-testid="day"][data-disabled="false"]`).getByText(String(tomorrowDate), { exact: true });
+    const tomorrowDay = page
+      .locator(`[data-testid="day"][data-disabled="false"]`)
+      .getByText(String(tomorrowDate), { exact: true });
     await tomorrowDay.waitFor();
     await tomorrowDay.click();
 
@@ -36,7 +46,7 @@ test.describe("onlyShowFirstAvailableSlot with regular events", () => {
   });
 
   test("Should show next available slot when first slot is booked", async ({ page, users, bookings }) => {
-    const user = await users.create();
+    const user = await users.create({ schedule: allDaysAvailable });
     const eventType = user.eventTypes.find((e) => e.slug === "30-min")!;
 
     await prisma.eventType.update({
@@ -60,7 +70,9 @@ test.describe("onlyShowFirstAvailableSlot with regular events", () => {
     await page.goto(`/${user.username}/30-min`);
 
     const tomorrowDate = tomorrow.getDate();
-    const tomorrowDay = page.locator(`[data-testid="day"][data-disabled="false"]`).getByText(String(tomorrowDate), { exact: true });
+    const tomorrowDay = page
+      .locator(`[data-testid="day"][data-disabled="false"]`)
+      .getByText(String(tomorrowDate), { exact: true });
     await tomorrowDay.waitFor();
     await tomorrowDay.click();
 
@@ -73,7 +85,7 @@ test.describe("onlyShowFirstAvailableSlot with regular events", () => {
   });
 
   test("Should allow booking the shown slot", async ({ page, users }) => {
-    const user = await users.create();
+    const user = await users.create({ schedule: allDaysAvailable });
     const eventType = user.eventTypes.find((e) => e.slug === "30-min")!;
 
     await prisma.eventType.update({
@@ -87,7 +99,9 @@ test.describe("onlyShowFirstAvailableSlot with regular events", () => {
     tomorrow.setDate(tomorrow.getDate() + 1);
     const tomorrowDate = tomorrow.getDate();
 
-    const tomorrowDay = page.locator(`[data-testid="day"][data-disabled="false"]`).getByText(String(tomorrowDate), { exact: true });
+    const tomorrowDay = page
+      .locator(`[data-testid="day"][data-disabled="false"]`)
+      .getByText(String(tomorrowDate), { exact: true });
     await tomorrowDay.waitFor();
     await tomorrowDay.click();
 
@@ -110,15 +124,20 @@ test.describe("onlyShowFirstAvailableSlot with seated events", () => {
     users,
     bookings,
   }) => {
-    const { user, eventType } = await createUserWithSeatedEventAndAttendees({ users, bookings }, []);
-
-    await prisma.eventType.update({
-      data: {
-        seatsPerTimeSlot: 2,
-        onlyShowFirstAvailableSlot: true,
-      },
-      where: { id: eventType.id },
+    const user = await users.create({
+      schedule: allDaysAvailable,
+      eventTypes: [
+        {
+          title: "Seated event",
+          slug: "seats",
+          length: 30,
+          seatsPerTimeSlot: 2,
+          onlyShowFirstAvailableSlot: true,
+          disableGuests: true,
+        },
+      ],
     });
+    const eventType = user.eventTypes.find((e) => e.slug === "seats")!;
 
     const tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
@@ -158,13 +177,15 @@ test.describe("onlyShowFirstAvailableSlot with seated events", () => {
     await page.goto(`/${user.username}/seats`);
 
     const tomorrowDate = tomorrow.getDate();
-    const tomorrowDay = page.locator(`[data-testid="day"][data-disabled="false"]`).getByText(String(tomorrowDate), { exact: true });
+    const tomorrowDay = page
+      .locator(`[data-testid="day"][data-disabled="false"]`)
+      .getByText(String(tomorrowDate), { exact: true });
     await tomorrowDay.waitFor();
     await tomorrowDay.click();
 
     const timeSlots = page.locator('[data-testid="time"]');
     await expect(timeSlots.first()).toBeVisible({ timeout: 10000 });
-    expect(await timeSlots.count()).toBeGreaterThan(0);
+    expect(await timeSlots.count()).toBe(1);
 
     const slotTime = await timeSlots.first().getAttribute("data-time");
     expect(slotTime).toContain("9:30");
@@ -176,15 +197,20 @@ test.describe("onlyShowFirstAvailableSlot with seated events", () => {
   });
 
   test("Should show slot when seats are partially booked", async ({ page, users, bookings }) => {
-    const { user, eventType } = await createUserWithSeatedEventAndAttendees({ users, bookings }, []);
-
-    await prisma.eventType.update({
-      data: {
-        seatsPerTimeSlot: 3,
-        onlyShowFirstAvailableSlot: true,
-      },
-      where: { id: eventType.id },
+    const user = await users.create({
+      schedule: allDaysAvailable,
+      eventTypes: [
+        {
+          title: "Seated event",
+          slug: "seats",
+          length: 30,
+          seatsPerTimeSlot: 3,
+          onlyShowFirstAvailableSlot: true,
+          disableGuests: true,
+        },
+      ],
     });
+    const eventType = user.eventTypes.find((e) => e.slug === "seats")!;
 
     const tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
@@ -221,7 +247,9 @@ test.describe("onlyShowFirstAvailableSlot with seated events", () => {
     await page.goto(`/${user.username}/seats`);
 
     const tomorrowDate = tomorrow.getDate();
-    const tomorrowDay = page.locator(`[data-testid="day"][data-disabled="false"]`).getByText(String(tomorrowDate), { exact: true });
+    const tomorrowDay = page
+      .locator(`[data-testid="day"][data-disabled="false"]`)
+      .getByText(String(tomorrowDate), { exact: true });
     await tomorrowDay.waitFor();
     await tomorrowDay.click();
 
@@ -233,14 +261,19 @@ test.describe("onlyShowFirstAvailableSlot with seated events", () => {
     expect(slotTime).toContain("9:00");
   });
 
-  test("Should show only one slot per day when enabled", async ({ page, users, bookings }) => {
-    const { user, eventType } = await createUserWithSeatedEventAndAttendees({ users, bookings }, []);
-
-    await prisma.eventType.update({
-      data: {
-        onlyShowFirstAvailableSlot: true,
-      },
-      where: { id: eventType.id },
+  test("Should show only one slot per day when enabled", async ({ page, users }) => {
+    const user = await users.create({
+      schedule: allDaysAvailable,
+      eventTypes: [
+        {
+          title: "Seated event",
+          slug: "seats",
+          length: 30,
+          seatsPerTimeSlot: 5,
+          onlyShowFirstAvailableSlot: true,
+          disableGuests: true,
+        },
+      ],
     });
 
     await page.goto(`/${user.username}/seats`);
@@ -249,7 +282,9 @@ test.describe("onlyShowFirstAvailableSlot with seated events", () => {
     tomorrow.setDate(tomorrow.getDate() + 1);
     const tomorrowDate = tomorrow.getDate();
 
-    const tomorrowDay = page.locator(`[data-testid="day"][data-disabled="false"]`).getByText(String(tomorrowDate), { exact: true });
+    const tomorrowDay = page
+      .locator(`[data-testid="day"][data-disabled="false"]`)
+      .getByText(String(tomorrowDate), { exact: true });
     await tomorrowDay.waitFor();
     await tomorrowDay.click();
 
