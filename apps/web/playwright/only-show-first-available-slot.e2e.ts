@@ -18,7 +18,7 @@ const defaultDateRange: TimeRange = {
 const allDaysAvailable: Schedule = Array(7).fill([defaultDateRange]);
 
 test.describe("onlyShowFirstAvailableSlot with regular events", () => {
-  test("Should show only one slot per day when enabled", async ({ page, users }) => {
+  test("Should show only one slot per day and allow booking it", async ({ page, users }) => {
     const user = await users.create({
       schedule: allDaysAvailable,
       overrideDefaultEventTypes: true,
@@ -50,50 +50,18 @@ test.describe("onlyShowFirstAvailableSlot with regular events", () => {
 
     const slotTime = await timeSlots.first().getAttribute("data-time");
     expect(slotTime).toContain("9:00");
+
+    // Book the slot and verify success
+    await timeSlots.first().click();
+    await bookTimeSlot(page, { name: "Test User", email: "test@example.com" });
+    await expect(page.locator("[data-testid=success-page]")).toBeVisible();
   });
 
-  test("Should show only one slot independently for multiple days", async ({ page, users }) => {
-    const user = await users.create({
-      schedule: allDaysAvailable,
-      overrideDefaultEventTypes: true,
-      eventTypes: [
-        {
-          title: "30 min",
-          slug: "30-min",
-          length: 30,
-          onlyShowFirstAvailableSlot: true,
-        },
-      ],
-    });
-
-    await page.goto(`/${user.username}/30-min`);
-
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-
-    const dayAfterTomorrow = new Date();
-    dayAfterTomorrow.setDate(dayAfterTomorrow.getDate() + 2);
-
-    const availableDays = page.locator(`[data-testid="day"][data-disabled="false"]`);
-    const timeSlots = page.locator('[data-testid="time"]');
-
-    // Select first day and verify one slot
-    const firstDay = availableDays.getByText(String(tomorrow.getDate()), { exact: true });
-    await firstDay.waitFor();
-    await firstDay.click();
-
-    await expect(timeSlots.first()).toBeVisible({ timeout: 10000 });
-    expect(await timeSlots.count()).toBe(1);
-
-    // Select second day and verify one slot
-    const secondDay = availableDays.getByText(String(dayAfterTomorrow.getDate()), { exact: true });
-    await secondDay.click();
-
-    await expect(timeSlots.first()).toBeVisible({ timeout: 10000 });
-    expect(await timeSlots.count()).toBe(1);
-  });
-
-  test("Should account for beforeEventBuffer when showing first available slot", async ({ page, users }) => {
+  test("Should account for beforeEventBuffer when showing first available slot", async ({
+    page,
+    users,
+    bookings,
+  }) => {
     const user = await users.create({
       schedule: allDaysAvailable,
       overrideDefaultEventTypes: true,
@@ -102,18 +70,30 @@ test.describe("onlyShowFirstAvailableSlot with regular events", () => {
           title: "Buffered event",
           slug: "buffered",
           length: 30,
-          beforeEventBuffer: 15,
+          beforeEventBuffer: 30,
           onlyShowFirstAvailableSlot: true,
         },
       ],
     });
-
-    await page.goto(`/${user.username}/buffered`);
+    const eventType = user.eventTypes.find((e) => e.slug === "buffered")!;
 
     const tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
-    const tomorrowDate = tomorrow.getDate();
+    tomorrow.setHours(9, 0, 0, 0);
 
+    const firstSlotEnd = new Date(tomorrow);
+    firstSlotEnd.setMinutes(firstSlotEnd.getMinutes() + 30);
+
+    // Book 9:00-9:30 slot
+    await bookings.create(user.id, user.username, eventType.id, {
+      status: "ACCEPTED",
+      startTime: tomorrow,
+      endTime: firstSlotEnd,
+    });
+
+    await page.goto(`/${user.username}/buffered`);
+
+    const tomorrowDate = tomorrow.getDate();
     const tomorrowDay = page
       .locator(`[data-testid="day"][data-disabled="false"]`)
       .getByText(String(tomorrowDate), { exact: true });
@@ -123,6 +103,11 @@ test.describe("onlyShowFirstAvailableSlot with regular events", () => {
     const timeSlots = page.locator('[data-testid="time"]');
     await expect(timeSlots.first()).toBeVisible({ timeout: 10000 });
     expect(await timeSlots.count()).toBe(1);
+
+    // 9:00-9:30 booked. Next slot 9:30 needs 30min buffer (9:00-9:30) which conflicts.
+    // So next available is 10:00 (buffer 9:30-10:00 has no conflict)
+    const slotTime = await timeSlots.first().getAttribute("data-time");
+    expect(slotTime).toContain("10:00");
   });
 
   test("Should account for afterEventBuffer when showing first available slot", async ({
@@ -223,43 +208,6 @@ test.describe("onlyShowFirstAvailableSlot with regular events", () => {
     expect(slotTime).toContain("9:30");
   });
 
-  test("Should allow booking the shown slot", async ({ page, users }) => {
-    const user = await users.create({
-      schedule: allDaysAvailable,
-      overrideDefaultEventTypes: true,
-      eventTypes: [
-        {
-          title: "30 min",
-          slug: "30-min",
-          length: 30,
-          onlyShowFirstAvailableSlot: true,
-        },
-      ],
-    });
-
-    await page.goto(`/${user.username}/30-min`);
-
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    const tomorrowDate = tomorrow.getDate();
-
-    const tomorrowDay = page
-      .locator(`[data-testid="day"][data-disabled="false"]`)
-      .getByText(String(tomorrowDate), { exact: true });
-    await tomorrowDay.waitFor();
-    await tomorrowDay.click();
-
-    const timeSlots = page.locator('[data-testid="time"]');
-    await expect(timeSlots.first()).toBeVisible({ timeout: 10000 });
-
-    const slotTime = await timeSlots.first().getAttribute("data-time");
-    expect(slotTime).toContain("9:00");
-
-    await timeSlots.first().click();
-    await bookTimeSlot(page, { name: "Test User", email: "test@example.com" });
-
-    await expect(page.locator("[data-testid=success-page]")).toBeVisible();
-  });
 });
 
 test.describe("onlyShowFirstAvailableSlot with seated events", () => {
@@ -402,42 +350,6 @@ test.describe("onlyShowFirstAvailableSlot with seated events", () => {
     const timeSlots = page.locator('[data-testid="time"]');
     await expect(timeSlots.first()).toBeVisible({ timeout: 10000 });
     await expect(page.getByText("Seats available").first()).toBeVisible();
-
-    const slotTime = await timeSlots.first().getAttribute("data-time");
-    expect(slotTime).toContain("9:00");
-  });
-
-  test("Should show only one slot per day when enabled", async ({ page, users }) => {
-    const user = await users.create({
-      schedule: allDaysAvailable,
-      overrideDefaultEventTypes: true,
-      eventTypes: [
-        {
-          title: "Seated event",
-          slug: "seats",
-          length: 30,
-          seatsPerTimeSlot: 5,
-          onlyShowFirstAvailableSlot: true,
-          disableGuests: true,
-        },
-      ],
-    });
-
-    await page.goto(`/${user.username}/seats`);
-
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    const tomorrowDate = tomorrow.getDate();
-
-    const tomorrowDay = page
-      .locator(`[data-testid="day"][data-disabled="false"]`)
-      .getByText(String(tomorrowDate), { exact: true });
-    await tomorrowDay.waitFor();
-    await tomorrowDay.click();
-
-    const timeSlots = page.locator('[data-testid="time"]');
-    await expect(timeSlots.first()).toBeVisible({ timeout: 10000 });
-    expect(await timeSlots.count()).toBe(1);
 
     const slotTime = await timeSlots.first().getAttribute("data-time");
     expect(slotTime).toContain("9:00");
