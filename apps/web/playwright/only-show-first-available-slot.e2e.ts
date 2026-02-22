@@ -1,12 +1,14 @@
+import dayjs from "@calcom/dayjs";
 import prisma from "@calcom/prisma";
 import type { Schedule, TimeRange } from "@calcom/types/schedule";
 import { expect } from "@playwright/test";
 import { v4 as uuidv4 } from "uuid";
+import { TimeZoneEnum } from "./fixtures/types";
 import { test } from "./lib/fixtures";
 import { bookTimeSlot } from "./lib/testUtils";
 
 test.describe.configure({ mode: "parallel" });
-test.afterEach(({ users }) => users.deleteAll());
+test.afterEach(async ({ users }) => users.deleteAll());
 
 // 9 AM - 5 PM every day (including weekends) to ensure tomorrow is always available
 const defaultDateRange: TimeRange = {
@@ -17,12 +19,17 @@ const allDaysAvailable: Schedule = Array(7).fill([defaultDateRange]);
 
 test.describe("onlyShowFirstAvailableSlot with regular events", () => {
   test("Should show only one slot per day when enabled", async ({ page, users }) => {
-    const user = await users.create({ schedule: allDaysAvailable });
-    const eventType = user.eventTypes.find((e) => e.slug === "30-min")!;
-
-    await prisma.eventType.update({
-      data: { onlyShowFirstAvailableSlot: true },
-      where: { id: eventType.id },
+    const user = await users.create({
+      schedule: allDaysAvailable,
+      overrideDefaultEventTypes: true,
+      eventTypes: [
+        {
+          title: "30 min",
+          slug: "30-min",
+          length: 30,
+          onlyShowFirstAvailableSlot: true,
+        },
+      ],
     });
 
     await page.goto(`/${user.username}/30-min`);
@@ -45,14 +52,146 @@ test.describe("onlyShowFirstAvailableSlot with regular events", () => {
     expect(slotTime).toContain("9:00");
   });
 
-  test("Should show next available slot when first slot is booked", async ({ page, users, bookings }) => {
-    const user = await users.create({ schedule: allDaysAvailable });
-    const eventType = user.eventTypes.find((e) => e.slug === "30-min")!;
-
-    await prisma.eventType.update({
-      data: { onlyShowFirstAvailableSlot: true },
-      where: { id: eventType.id },
+  test("Should show only one slot independently for multiple days", async ({ page, users }) => {
+    const user = await users.create({
+      schedule: allDaysAvailable,
+      overrideDefaultEventTypes: true,
+      eventTypes: [
+        {
+          title: "30 min",
+          slug: "30-min",
+          length: 30,
+          onlyShowFirstAvailableSlot: true,
+        },
+      ],
     });
+
+    await page.goto(`/${user.username}/30-min`);
+
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+
+    const dayAfterTomorrow = new Date();
+    dayAfterTomorrow.setDate(dayAfterTomorrow.getDate() + 2);
+
+    const availableDays = page.locator(`[data-testid="day"][data-disabled="false"]`);
+    const timeSlots = page.locator('[data-testid="time"]');
+
+    // Select first day and verify one slot
+    const firstDay = availableDays.getByText(String(tomorrow.getDate()), { exact: true });
+    await firstDay.waitFor();
+    await firstDay.click();
+
+    await expect(timeSlots.first()).toBeVisible({ timeout: 10000 });
+    expect(await timeSlots.count()).toBe(1);
+
+    // Select second day and verify one slot
+    const secondDay = availableDays.getByText(String(dayAfterTomorrow.getDate()), { exact: true });
+    await secondDay.click();
+
+    await expect(timeSlots.first()).toBeVisible({ timeout: 10000 });
+    expect(await timeSlots.count()).toBe(1);
+  });
+
+  test("Should account for beforeEventBuffer when showing first available slot", async ({ page, users }) => {
+    const user = await users.create({
+      schedule: allDaysAvailable,
+      overrideDefaultEventTypes: true,
+      eventTypes: [
+        {
+          title: "Buffered event",
+          slug: "buffered",
+          length: 30,
+          beforeEventBuffer: 15,
+          onlyShowFirstAvailableSlot: true,
+        },
+      ],
+    });
+
+    await page.goto(`/${user.username}/buffered`);
+
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const tomorrowDate = tomorrow.getDate();
+
+    const tomorrowDay = page
+      .locator(`[data-testid="day"][data-disabled="false"]`)
+      .getByText(String(tomorrowDate), { exact: true });
+    await tomorrowDay.waitFor();
+    await tomorrowDay.click();
+
+    const timeSlots = page.locator('[data-testid="time"]');
+    await expect(timeSlots.first()).toBeVisible({ timeout: 10000 });
+    expect(await timeSlots.count()).toBe(1);
+  });
+
+  test("Should account for afterEventBuffer when showing first available slot", async ({
+    page,
+    users,
+    bookings,
+  }) => {
+    const user = await users.create({
+      schedule: allDaysAvailable,
+      overrideDefaultEventTypes: true,
+      eventTypes: [
+        {
+          title: "Buffered event",
+          slug: "buffered",
+          length: 30,
+          afterEventBuffer: 15,
+          onlyShowFirstAvailableSlot: true,
+        },
+      ],
+    });
+    const eventType = user.eventTypes.find((e) => e.slug === "buffered")!;
+
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    tomorrow.setHours(9, 0, 0, 0);
+
+    const firstSlotEnd = new Date(tomorrow);
+    firstSlotEnd.setMinutes(firstSlotEnd.getMinutes() + 30);
+
+    // Book 9:00 slot - with 15min afterEventBuffer, next available should be 9:45
+    await bookings.create(user.id, user.username, eventType.id, {
+      status: "ACCEPTED",
+      startTime: tomorrow,
+      endTime: firstSlotEnd,
+    });
+
+    await page.goto(`/${user.username}/buffered`);
+
+    const tomorrowDate = tomorrow.getDate();
+    const tomorrowDay = page
+      .locator(`[data-testid="day"][data-disabled="false"]`)
+      .getByText(String(tomorrowDate), { exact: true });
+    await tomorrowDay.waitFor();
+    await tomorrowDay.click();
+
+    const timeSlots = page.locator('[data-testid="time"]');
+    await expect(timeSlots.first()).toBeVisible({ timeout: 10000 });
+    expect(await timeSlots.count()).toBe(1);
+
+    // 9:00 booked + 30min event + 15min buffer = 9:45, but slots are at 30-min intervals
+    // so next available slot is 10:00
+    const slotTime = await timeSlots.first().getAttribute("data-time");
+    expect(slotTime).toContain("10:00");
+  });
+
+  test("Should show next available slot when first slot is booked", async ({ page, users, bookings }) => {
+    const user = await users.create({
+      schedule: allDaysAvailable,
+      overrideDefaultEventTypes: true,
+      eventTypes: [
+        {
+          title: "30 min",
+          slug: "30-min",
+          length: 30,
+          onlyShowFirstAvailableSlot: true,
+        },
+      ],
+    });
+    const eventType = user.eventTypes.find((e) => e.slug === "30-min")!;
 
     const tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
@@ -85,12 +224,17 @@ test.describe("onlyShowFirstAvailableSlot with regular events", () => {
   });
 
   test("Should allow booking the shown slot", async ({ page, users }) => {
-    const user = await users.create({ schedule: allDaysAvailable });
-    const eventType = user.eventTypes.find((e) => e.slug === "30-min")!;
-
-    await prisma.eventType.update({
-      data: { onlyShowFirstAvailableSlot: true },
-      where: { id: eventType.id },
+    const user = await users.create({
+      schedule: allDaysAvailable,
+      overrideDefaultEventTypes: true,
+      eventTypes: [
+        {
+          title: "30 min",
+          slug: "30-min",
+          length: 30,
+          onlyShowFirstAvailableSlot: true,
+        },
+      ],
     });
 
     await page.goto(`/${user.username}/30-min`);
@@ -126,6 +270,7 @@ test.describe("onlyShowFirstAvailableSlot with seated events", () => {
   }) => {
     const user = await users.create({
       schedule: allDaysAvailable,
+      overrideDefaultEventTypes: true,
       eventTypes: [
         {
           title: "Seated event",
@@ -199,6 +344,7 @@ test.describe("onlyShowFirstAvailableSlot with seated events", () => {
   test("Should show slot when seats are partially booked", async ({ page, users, bookings }) => {
     const user = await users.create({
       schedule: allDaysAvailable,
+      overrideDefaultEventTypes: true,
       eventTypes: [
         {
           title: "Seated event",
@@ -264,6 +410,7 @@ test.describe("onlyShowFirstAvailableSlot with seated events", () => {
   test("Should show only one slot per day when enabled", async ({ page, users }) => {
     const user = await users.create({
       schedule: allDaysAvailable,
+      overrideDefaultEventTypes: true,
       eventTypes: [
         {
           title: "Seated event",
@@ -294,5 +441,62 @@ test.describe("onlyShowFirstAvailableSlot with seated events", () => {
 
     const slotTime = await timeSlots.first().getAttribute("data-time");
     expect(slotTime).toContain("9:00");
+  });
+});
+
+test.describe("onlyShowFirstAvailableSlot with different timezones", () => {
+  test("Should show correct first slot time when booker changes timezone", async ({ page, users }) => {
+    const user = await users.create({
+      timeZone: TimeZoneEnum.UK,
+      schedule: allDaysAvailable,
+      overrideDefaultEventTypes: true,
+      eventTypes: [
+        {
+          title: "30 min",
+          slug: "30-min",
+          length: 30,
+          onlyShowFirstAvailableSlot: true,
+        },
+      ],
+    });
+
+    await page.goto(`/${user.username}/30-min`);
+
+    const tomorrow = dayjs().add(1, "day");
+    const tomorrowDate = tomorrow.date();
+
+    const tomorrowDay = page
+      .locator(`[data-testid="day"][data-disabled="false"]`)
+      .getByText(String(tomorrowDate), { exact: true });
+    await tomorrowDay.waitFor();
+    await tomorrowDay.click();
+
+    const timeSlots = page.locator('[data-testid="time"]');
+    await expect(timeSlots.first()).toBeVisible({ timeout: 10000 });
+    expect(await timeSlots.count()).toBe(1);
+
+    // Schedule is 9:00 UTC. Calculate expected time in London timezone.
+    const slotInUTC = tomorrow.utc().hour(9).minute(0);
+    const expectedLondonTime = slotInUTC.tz("Europe/London").format("h:mma").toLowerCase();
+
+    const displayedTimeLondon = await timeSlots.first().textContent();
+    expect(displayedTimeLondon?.toLowerCase()).toContain(expectedLondonTime);
+
+    // Change timezone to America/New_York
+    const timezoneSelector = page.locator('[data-testid="event-meta-current-timezone"]');
+    await timezoneSelector.click();
+    await page.locator('[aria-label="Timezone Select"]').fill("New York");
+    await page.keyboard.press("Enter");
+
+    await expect(page.getByTestId("timezone-select").getByText("America/New York")).toBeVisible({ timeout: 10000 });
+
+    // Wait for slots to update and verify still only one slot
+    await expect(timeSlots.first()).toBeVisible({ timeout: 10000 });
+    expect(await timeSlots.count()).toBe(1);
+
+    // Verify displayed time matches expected New York time
+    const expectedNYTime = slotInUTC.tz("America/New_York").format("h:mma").toLowerCase();
+    const displayedTimeNY = await timeSlots.first().textContent();
+    expect(displayedTimeNY?.toLowerCase()).toContain(expectedNYTime);
   });
 });
