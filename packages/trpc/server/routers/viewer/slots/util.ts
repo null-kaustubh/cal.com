@@ -59,7 +59,6 @@ import type { Logger } from "tslog";
 import { v4 as uuid } from "uuid";
 import type { TGetScheduleInputSchema } from "./getSchedule.schema";
 import type { GetScheduleOptions } from "./types";
-import { event } from "~/server/routers/publicViewer/procedures/event";
 
 const log = logger.getSubLogger({ prefix: ["[slots/util]"] });
 const DEFAULT_SLOTS_CACHE_TTL = 2000;
