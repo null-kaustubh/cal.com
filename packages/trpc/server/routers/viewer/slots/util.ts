@@ -1439,6 +1439,7 @@ export class AvailableSlotsService {
           const timeISO = time.toISOString();
 
           r[dateString] = r[dateString] || [];
+
           const existingBooking = currentSeatsMap.get(timeISO);
 
           if(eventType?.seatsPerTimeSlot) {
