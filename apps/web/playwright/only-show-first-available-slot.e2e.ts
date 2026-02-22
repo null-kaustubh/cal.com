@@ -7,6 +7,103 @@ import { bookTimeSlot, createUserWithSeatedEventAndAttendees } from "./lib/testU
 test.describe.configure({ mode: "parallel" });
 test.afterEach(({ users }) => users.deleteAll());
 
+test.describe("onlyShowFirstAvailableSlot with regular events", () => {
+  test("Should show only one slot per day when enabled", async ({ page, users }) => {
+    const user = await users.create();
+    const eventType = user.eventTypes.find((e) => e.slug === "30-min")!;
+
+    await prisma.eventType.update({
+      data: { onlyShowFirstAvailableSlot: true },
+      where: { id: eventType.id },
+    });
+
+    await page.goto(`/${user.username}/30-min`);
+
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const tomorrowDate = tomorrow.getDate();
+
+    const tomorrowDay = page.locator(`[data-testid="day"][data-disabled="false"]`).getByText(String(tomorrowDate), { exact: true });
+    await tomorrowDay.waitFor();
+    await tomorrowDay.click();
+
+    const timeSlots = page.locator('[data-testid="time"]');
+    await expect(timeSlots.first()).toBeVisible({ timeout: 10000 });
+    expect(await timeSlots.count()).toBe(1);
+
+    const slotTime = await timeSlots.first().getAttribute("data-time");
+    expect(slotTime).toContain("9:00");
+  });
+
+  test("Should show next available slot when first slot is booked", async ({ page, users, bookings }) => {
+    const user = await users.create();
+    const eventType = user.eventTypes.find((e) => e.slug === "30-min")!;
+
+    await prisma.eventType.update({
+      data: { onlyShowFirstAvailableSlot: true },
+      where: { id: eventType.id },
+    });
+
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    tomorrow.setHours(9, 0, 0, 0);
+
+    const firstSlotEnd = new Date(tomorrow);
+    firstSlotEnd.setMinutes(firstSlotEnd.getMinutes() + 30);
+
+    await bookings.create(user.id, user.username, eventType.id, {
+      status: "ACCEPTED",
+      startTime: tomorrow,
+      endTime: firstSlotEnd,
+    });
+
+    await page.goto(`/${user.username}/30-min`);
+
+    const tomorrowDate = tomorrow.getDate();
+    const tomorrowDay = page.locator(`[data-testid="day"][data-disabled="false"]`).getByText(String(tomorrowDate), { exact: true });
+    await tomorrowDay.waitFor();
+    await tomorrowDay.click();
+
+    const timeSlots = page.locator('[data-testid="time"]');
+    await expect(timeSlots.first()).toBeVisible({ timeout: 10000 });
+    expect(await timeSlots.count()).toBe(1);
+
+    const slotTime = await timeSlots.first().getAttribute("data-time");
+    expect(slotTime).toContain("9:30");
+  });
+
+  test("Should allow booking the shown slot", async ({ page, users }) => {
+    const user = await users.create();
+    const eventType = user.eventTypes.find((e) => e.slug === "30-min")!;
+
+    await prisma.eventType.update({
+      data: { onlyShowFirstAvailableSlot: true },
+      where: { id: eventType.id },
+    });
+
+    await page.goto(`/${user.username}/30-min`);
+
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const tomorrowDate = tomorrow.getDate();
+
+    const tomorrowDay = page.locator(`[data-testid="day"][data-disabled="false"]`).getByText(String(tomorrowDate), { exact: true });
+    await tomorrowDay.waitFor();
+    await tomorrowDay.click();
+
+    const timeSlots = page.locator('[data-testid="time"]');
+    await expect(timeSlots.first()).toBeVisible({ timeout: 10000 });
+
+    const slotTime = await timeSlots.first().getAttribute("data-time");
+    expect(slotTime).toContain("9:00");
+
+    await timeSlots.first().click();
+    await bookTimeSlot(page, { name: "Test User", email: "test@example.com" });
+
+    await expect(page.locator("[data-testid=success-page]")).toBeVisible();
+  });
+});
+
 test.describe("onlyShowFirstAvailableSlot with seated events", () => {
   test("Should show and allow booking next available slot when first slot reaches seat capacity", async ({
     page,
@@ -162,102 +259,5 @@ test.describe("onlyShowFirstAvailableSlot with seated events", () => {
 
     const slotTime = await timeSlots.first().getAttribute("data-time");
     expect(slotTime).toContain("9:00");
-  });
-});
-
-test.describe("onlyShowFirstAvailableSlot with regular events", () => {
-  test("Should show only one slot per day when enabled", async ({ page, users }) => {
-    const user = await users.create();
-    const eventType = user.eventTypes.find((e) => e.slug === "30-min")!;
-
-    await prisma.eventType.update({
-      data: { onlyShowFirstAvailableSlot: true },
-      where: { id: eventType.id },
-    });
-
-    await page.goto(`/${user.username}/30-min`);
-
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    const tomorrowDate = tomorrow.getDate();
-
-    const tomorrowDay = page.locator(`[data-testid="day"][data-disabled="false"]`).getByText(String(tomorrowDate), { exact: true });
-    await tomorrowDay.waitFor();
-    await tomorrowDay.click();
-
-    const timeSlots = page.locator('[data-testid="time"]');
-    await expect(timeSlots.first()).toBeVisible({ timeout: 10000 });
-    expect(await timeSlots.count()).toBe(1);
-
-    const slotTime = await timeSlots.first().getAttribute("data-time");
-    expect(slotTime).toContain("9:00");
-  });
-
-  test("Should show next available slot when first slot is booked", async ({ page, users, bookings }) => {
-    const user = await users.create();
-    const eventType = user.eventTypes.find((e) => e.slug === "30-min")!;
-
-    await prisma.eventType.update({
-      data: { onlyShowFirstAvailableSlot: true },
-      where: { id: eventType.id },
-    });
-
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    tomorrow.setHours(9, 0, 0, 0);
-
-    const firstSlotEnd = new Date(tomorrow);
-    firstSlotEnd.setMinutes(firstSlotEnd.getMinutes() + 30);
-
-    await bookings.create(user.id, user.username, eventType.id, {
-      status: "ACCEPTED",
-      startTime: tomorrow,
-      endTime: firstSlotEnd,
-    });
-
-    await page.goto(`/${user.username}/30-min`);
-
-    const tomorrowDate = tomorrow.getDate();
-    const tomorrowDay = page.locator(`[data-testid="day"][data-disabled="false"]`).getByText(String(tomorrowDate), { exact: true });
-    await tomorrowDay.waitFor();
-    await tomorrowDay.click();
-
-    const timeSlots = page.locator('[data-testid="time"]');
-    await expect(timeSlots.first()).toBeVisible({ timeout: 10000 });
-    expect(await timeSlots.count()).toBe(1);
-
-    const slotTime = await timeSlots.first().getAttribute("data-time");
-    expect(slotTime).toContain("9:30");
-  });
-
-  test("Should allow booking the shown slot", async ({ page, users }) => {
-    const user = await users.create();
-    const eventType = user.eventTypes.find((e) => e.slug === "30-min")!;
-
-    await prisma.eventType.update({
-      data: { onlyShowFirstAvailableSlot: true },
-      where: { id: eventType.id },
-    });
-
-    await page.goto(`/${user.username}/30-min`);
-
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    const tomorrowDate = tomorrow.getDate();
-
-    const tomorrowDay = page.locator(`[data-testid="day"][data-disabled="false"]`).getByText(String(tomorrowDate), { exact: true });
-    await tomorrowDay.waitFor();
-    await tomorrowDay.click();
-
-    const timeSlots = page.locator('[data-testid="time"]');
-    await expect(timeSlots.first()).toBeVisible({ timeout: 10000 });
-
-    const slotTime = await timeSlots.first().getAttribute("data-time");
-    expect(slotTime).toContain("9:00");
-
-    await timeSlots.first().click();
-    await bookTimeSlot(page, { name: "Test User", email: "test@example.com" });
-
-    await expect(page.locator("[data-testid=success-page]")).toBeVisible();
   });
 });
