@@ -13,32 +13,45 @@ test.describe("onlyShowFirstAvailableSlot with seated events", () => {
     users,
     bookings,
   }) => {
-    const { user, booking } = await createUserWithSeatedEventAndAttendees({ users, bookings }, [
-      { name: "Attendee One", email: "attendee1@seats.com", timeZone: "Europe/Berlin" },
-      { name: "Attendee Two", email: "attendee2@seats.com", timeZone: "Europe/Berlin" },
-    ]);
-
-    const bookingWithEventType = await prisma.booking.findFirst({
-      where: { uid: booking.uid },
-      select: { id: true, eventTypeId: true },
-    });
+    const { user, eventType } = await createUserWithSeatedEventAndAttendees({ users, bookings }, []);
 
     await prisma.eventType.update({
       data: {
         seatsPerTimeSlot: 2,
         onlyShowFirstAvailableSlot: true,
       },
-      where: { id: bookingWithEventType?.eventTypeId ?? -1 },
+      where: { id: eventType.id },
+    });
+
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    tomorrow.setHours(9, 0, 0, 0);
+
+    const firstSlotEnd = new Date(tomorrow);
+    firstSlotEnd.setMinutes(firstSlotEnd.getMinutes() + 30);
+
+    const seatedBooking = await bookings.create(user.id, user.username, eventType.id, {
+      status: "ACCEPTED",
+      startTime: tomorrow,
+      endTime: firstSlotEnd,
+      attendees: {
+        createMany: {
+          data: [
+            { name: "Attendee One", email: "attendee1@seats.com", timeZone: "Europe/Berlin" },
+            { name: "Attendee Two", email: "attendee2@seats.com", timeZone: "Europe/Berlin" },
+          ],
+        },
+      },
     });
 
     const bookingAttendees = await prisma.attendee.findMany({
-      where: { bookingId: booking.id },
+      where: { bookingId: seatedBooking.id },
       select: { id: true, name: true, email: true },
     });
 
     await prisma.bookingSeat.createMany({
       data: bookingAttendees.map((attendee) => ({
-        bookingId: booking.id,
+        bookingId: seatedBooking.id,
         attendeeId: attendee.id,
         referenceUid: uuidv4(),
         data: { responses: { name: attendee.name, email: attendee.email } },
@@ -47,13 +60,10 @@ test.describe("onlyShowFirstAvailableSlot with seated events", () => {
 
     await page.goto(`/${user.username}/seats`);
 
-    const incrementMonth = page.getByTestId("incrementMonth");
-    await incrementMonth.waitFor();
-    await incrementMonth.click();
-
-    const firstAvailableDay = page.locator('[data-testid="day"][data-disabled="false"]').nth(0);
-    await firstAvailableDay.waitFor();
-    await firstAvailableDay.click();
+    const tomorrowDate = tomorrow.getDate();
+    const tomorrowDay = page.locator(`[data-testid="day"][data-disabled="false"]`).filter({ hasText: String(tomorrowDate) }).first();
+    await tomorrowDay.waitFor();
+    await tomorrowDay.click();
 
     const timeSlots = page.locator('[data-testid="time"]');
     await expect(timeSlots.first()).toBeVisible({ timeout: 10000 });
@@ -69,31 +79,42 @@ test.describe("onlyShowFirstAvailableSlot with seated events", () => {
   });
 
   test("Should show slot when seats are partially booked", async ({ page, users, bookings }) => {
-    const { user, booking } = await createUserWithSeatedEventAndAttendees({ users, bookings }, [
-      { name: "Attendee One", email: "attendee1@seats.com", timeZone: "Europe/Berlin" },
-    ]);
-
-    const bookingWithEventType = await prisma.booking.findFirst({
-      where: { uid: booking.uid },
-      select: { id: true, eventTypeId: true },
-    });
+    const { user, eventType } = await createUserWithSeatedEventAndAttendees({ users, bookings }, []);
 
     await prisma.eventType.update({
       data: {
         seatsPerTimeSlot: 3,
         onlyShowFirstAvailableSlot: true,
       },
-      where: { id: bookingWithEventType?.eventTypeId ?? -1 },
+      where: { id: eventType.id },
+    });
+
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    tomorrow.setHours(9, 0, 0, 0);
+
+    const firstSlotEnd = new Date(tomorrow);
+    firstSlotEnd.setMinutes(firstSlotEnd.getMinutes() + 30);
+
+    const seatedBooking = await bookings.create(user.id, user.username, eventType.id, {
+      status: "ACCEPTED",
+      startTime: tomorrow,
+      endTime: firstSlotEnd,
+      attendees: {
+        createMany: {
+          data: [{ name: "Attendee One", email: "attendee1@seats.com", timeZone: "Europe/Berlin" }],
+        },
+      },
     });
 
     const bookingAttendees = await prisma.attendee.findMany({
-      where: { bookingId: booking.id },
+      where: { bookingId: seatedBooking.id },
       select: { id: true, name: true, email: true },
     });
 
     await prisma.bookingSeat.createMany({
       data: bookingAttendees.map((attendee) => ({
-        bookingId: booking.id,
+        bookingId: seatedBooking.id,
         attendeeId: attendee.id,
         referenceUid: uuidv4(),
         data: { responses: { name: attendee.name, email: attendee.email } },
@@ -102,13 +123,10 @@ test.describe("onlyShowFirstAvailableSlot with seated events", () => {
 
     await page.goto(`/${user.username}/seats`);
 
-    const incrementMonth = page.getByTestId("incrementMonth");
-    await incrementMonth.waitFor();
-    await incrementMonth.click();
-
-    const firstAvailableDay = page.locator('[data-testid="day"][data-disabled="false"]').nth(0);
-    await firstAvailableDay.waitFor();
-    await firstAvailableDay.click();
+    const tomorrowDate = tomorrow.getDate();
+    const tomorrowDay = page.locator(`[data-testid="day"][data-disabled="false"]`).filter({ hasText: String(tomorrowDate) }).first();
+    await tomorrowDay.waitFor();
+    await tomorrowDay.click();
 
     const timeSlots = page.locator('[data-testid="time"]');
     await expect(timeSlots.first()).toBeVisible({ timeout: 10000 });
@@ -119,29 +137,24 @@ test.describe("onlyShowFirstAvailableSlot with seated events", () => {
   });
 
   test("Should show only one slot per day when enabled", async ({ page, users, bookings }) => {
-    const { user, booking } = await createUserWithSeatedEventAndAttendees({ users, bookings }, []);
-
-    const bookingWithEventType = await prisma.booking.findFirst({
-      where: { uid: booking.uid },
-      select: { id: true, eventTypeId: true },
-    });
+    const { user, eventType } = await createUserWithSeatedEventAndAttendees({ users, bookings }, []);
 
     await prisma.eventType.update({
       data: {
         onlyShowFirstAvailableSlot: true,
       },
-      where: { id: bookingWithEventType?.eventTypeId ?? -1 },
+      where: { id: eventType.id },
     });
 
     await page.goto(`/${user.username}/seats`);
 
-    const incrementMonth = page.getByTestId("incrementMonth");
-    await incrementMonth.waitFor();
-    await incrementMonth.click();
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const tomorrowDate = tomorrow.getDate();
 
-    const firstAvailableDay = page.locator('[data-testid="day"][data-disabled="false"]').nth(0);
-    await firstAvailableDay.waitFor();
-    await firstAvailableDay.click();
+    const tomorrowDay = page.locator(`[data-testid="day"][data-disabled="false"]`).filter({ hasText: String(tomorrowDate) }).first();
+    await tomorrowDay.waitFor();
+    await tomorrowDay.click();
 
     const timeSlots = page.locator('[data-testid="time"]');
     await expect(timeSlots.first()).toBeVisible({ timeout: 10000 });
@@ -164,13 +177,13 @@ test.describe("onlyShowFirstAvailableSlot with regular events", () => {
 
     await page.goto(`/${user.username}/30-min`);
 
-    const incrementMonth = page.getByTestId("incrementMonth");
-    await incrementMonth.waitFor();
-    await incrementMonth.click();
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const tomorrowDate = tomorrow.getDate();
 
-    const firstAvailableDay = page.locator('[data-testid="day"][data-disabled="false"]').nth(0);
-    await firstAvailableDay.waitFor();
-    await firstAvailableDay.click();
+    const tomorrowDay = page.locator(`[data-testid="day"][data-disabled="false"]`).filter({ hasText: String(tomorrowDate) }).first();
+    await tomorrowDay.waitFor();
+    await tomorrowDay.click();
 
     const timeSlots = page.locator('[data-testid="time"]');
     await expect(timeSlots.first()).toBeVisible({ timeout: 10000 });
@@ -189,32 +202,25 @@ test.describe("onlyShowFirstAvailableSlot with regular events", () => {
       where: { id: eventType.id },
     });
 
-    const now = new Date();
-    const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-    while (nextMonth.getDay() === 0 || nextMonth.getDay() === 6) {
-      nextMonth.setDate(nextMonth.getDate() + 1);
-    }
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    tomorrow.setHours(9, 0, 0, 0);
 
-    const firstSlotStart = new Date(nextMonth);
-    firstSlotStart.setHours(9, 0, 0, 0);
-    const firstSlotEnd = new Date(firstSlotStart);
+    const firstSlotEnd = new Date(tomorrow);
     firstSlotEnd.setMinutes(firstSlotEnd.getMinutes() + 30);
 
     await bookings.create(user.id, user.username, eventType.id, {
       status: "ACCEPTED",
-      startTime: firstSlotStart,
+      startTime: tomorrow,
       endTime: firstSlotEnd,
     });
 
     await page.goto(`/${user.username}/30-min`);
 
-    const incrementMonth = page.getByTestId("incrementMonth");
-    await incrementMonth.waitFor();
-    await incrementMonth.click();
-
-    const firstAvailableDay = page.locator('[data-testid="day"][data-disabled="false"]').nth(0);
-    await firstAvailableDay.waitFor();
-    await firstAvailableDay.click();
+    const tomorrowDate = tomorrow.getDate();
+    const tomorrowDay = page.locator(`[data-testid="day"][data-disabled="false"]`).filter({ hasText: String(tomorrowDate) }).first();
+    await tomorrowDay.waitFor();
+    await tomorrowDay.click();
 
     const timeSlots = page.locator('[data-testid="time"]');
     await expect(timeSlots.first()).toBeVisible({ timeout: 10000 });
@@ -235,13 +241,13 @@ test.describe("onlyShowFirstAvailableSlot with regular events", () => {
 
     await page.goto(`/${user.username}/30-min`);
 
-    const incrementMonth = page.getByTestId("incrementMonth");
-    await incrementMonth.waitFor();
-    await incrementMonth.click();
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const tomorrowDate = tomorrow.getDate();
 
-    const firstAvailableDay = page.locator('[data-testid="day"][data-disabled="false"]').nth(0);
-    await firstAvailableDay.waitFor();
-    await firstAvailableDay.click();
+    const tomorrowDay = page.locator(`[data-testid="day"][data-disabled="false"]`).filter({ hasText: String(tomorrowDate) }).first();
+    await tomorrowDay.waitFor();
+    await tomorrowDay.click();
 
     const timeSlots = page.locator('[data-testid="time"]');
     await expect(timeSlots.first()).toBeVisible({ timeout: 10000 });
