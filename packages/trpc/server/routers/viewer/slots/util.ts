@@ -59,6 +59,7 @@ import type { Logger } from "tslog";
 import { v4 as uuid } from "uuid";
 import type { TGetScheduleInputSchema } from "./getSchedule.schema";
 import type { GetScheduleOptions } from "./types";
+import { event } from "~/server/routers/publicViewer/procedures/event";
 
 const log = logger.getSubLogger({ prefix: ["[slots/util]"] });
 const DEFAULT_SLOTS_CACHE_TTL = 2000;
@@ -1442,14 +1443,13 @@ export class AvailableSlotsService {
 
           const seatsPerSlot = eventType?.seatsPerTimeSlot;
 
-          const isFullyBooked = seatsPerSlot && existingBooking && existingBooking.attendees >= seatsPerSlot;
-
-          // Skip fully booked slots
-          if (isFullyBooked) {
-            return r;
+          if(eventType?.seatsPerTimeSlot) {
+            const isFullyBooked = seatsPerSlot && existingBooking && existingBooking.attendees >= seatsPerSlot;
+            if(isFullyBooked) {
+              return r;
+            }
           }
 
-          // Apply first-slot-only AFTER capacity check
           if (eventType?.onlyShowFirstAvailableSlot && r[dateString].length > 0) {
             return r;
           }
